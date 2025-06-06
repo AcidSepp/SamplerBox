@@ -13,19 +13,20 @@
 # MODULES
 #########################################
 
-import numpy
 import os
 import re
-import rtmidi
-import samplerbox_audio
-import sounddevice
 import struct
 import threading
 import time
 import wave
+
+import numpy
+import rtmidi
+import samplerbox_audio
+import sounddevice
+
 from chunkLocal import Chunk
 from config import *
-from rtmidi.midiutil import open_midiinput
 
 
 #########################################
@@ -474,13 +475,31 @@ if USE_SYSTEMLED:
 # MAIN LOOP
 #########################################
 
-registredMidiInputs = []
+registeredMidiInputs = {}
+
+inputsWatcher = rtmidi.MidiIn()
 
 while True:
-    for port in rtmidi.MidiIn().get_ports():
-        if (port not in registredMidiInputs):
-            midiin, port_name = open_midiinput(port)
-            midiin.set_callback(MidiInputHandler(port_name))
-            print("Registered midi port #" + port + " device: " + port_name)
-            registredMidiInputs.append(port)
+    ports = inputsWatcher.get_ports()
+
+    # add new midi devices
+    for port, name in enumerate(ports):
+        if name not in registeredMidiInputs:
+            midiin = rtmidi.MidiIn()
+            midiin.open_port(port)
+            midiin.set_callback(MidiInputHandler(name))
+            registeredMidiInputs[name] = midiin
+            print(f"Registered MIDI port #{port} device: {name}")
+
+    # close old midi devices
+    toRemove = []
+    for name, midiin in registeredMidiInputs.items():
+        if name not in ports:
+            midiin.close_port()
+            toRemove.append(name)
+
+    for name in toRemove:
+        del registeredMidiInputs[name]
+        print(f"Unregistered MIDI device: {name}")
+
     time.sleep(2)
