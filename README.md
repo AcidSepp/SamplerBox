@@ -20,40 +20,33 @@ a manual install:
 
 0. Start with a standard RaspiOS intsall. The following steps have been tested
    with [2021-05-07-raspios-buster-armhf-lite.zip](https://downloads.raspberrypi.org/raspios_lite_armhf/images/raspios_lite_armhf-2021-05-28/2021-05-07-raspios-buster-armhf-lite.zip).
++ Download SamplerBox:
 
-1. Download SamplerBox:
+~~~
+git clone https://github.com/acidsepp/SamplerBox.git
+cd SamplerBox
+~~~
 
-    ~~~
-    git clone https://github.com/josephernest/SamplerBox.git
-    cd SamplerBox
-    ~~~
++ Setup virtual env
 
-2. Setup virtual env
+~~~
+python3 -m venv venv
+source venv/bin/activate
+~~~
 
-   ~~~
-   python3 -m venv venv
-   source venv/bin/activate
-   ~~~
++ install
 
-3. Install dependencies
+~~~
+pip install -e .  
+~~~
 
-   ~~~
-   pip3 install cython cffi sounddevice pyserial numpy python-rtMidi setuptools
-   ~~~
+5. run
 
-4. Install
+~~~
+python3 samplerbox.py
+~~~
 
-    ~~~
-    python3 setup.py build_ext --inplace
-    ~~~
-
-5.Reboot the Pi, and run the soft with:
-
-    ~~~
-    python3 samplerbox.py
-    ~~~
-
-    Play some notes on the connected MIDI keyboard, you'll hear some sound!
+Play some notes on the connected MIDI keyboard, you'll hear some sound!
 
 6*(Optional)*  Modify `config.py` if you want to change root directory for sample-sets, default soundcard, etc.
 
