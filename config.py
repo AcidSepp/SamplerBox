@@ -14,3 +14,7 @@ SERIALPORT_BAUDRATE = 31250
 # Set MIDI Channel to listen. The numbering starts with '0'.
 # Set to 'None' to listen to all MIDI channels.
 MIDI_CHANNEL = 0
+SOUNDFONT = None # "./KawaiStereoGrand.sf2"
+
+DEFAULT_BANK = 0x4
+DEFAULT_PROGRAM = 0x0

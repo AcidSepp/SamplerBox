@@ -21,42 +21,54 @@ import time
 
 from config import *
 
+from pathlib import Path
+
 preset = 0
 
 fs = fluidsynth.Synth(gain=1.0)
 fs.setting('audio.driver', 'pulseaudio')
 fs.start()
 
-sfid1 = fs.sfload("synths.sf2")
-fs.program_select(0, sfid1, 0, 0)
+if SOUNDFONT:
+    sfid = fs.sfload(SOUNDFONT)
+    print(f"Loading soundfont from file: {SOUNDFONT}")
+else:
+    directory = Path(SAMPLES_DIR)
+    sf2_files = [f.name for f in directory.glob("*.sf2") if f.is_file()]
+
+    for filename in sf2_files:
+        sfid = fs.sfload(filename)
+        print(f"Loading soundfont from file: {filename}")
+
+fs.bank_select(0, DEFAULT_BANK)
+fs.program_change(0, DEFAULT_PROGRAM)
+
+def forwaredToFluidSynt(message):
+    global preset
+    messagetype = message[0] >> 4
+    messagechannel = (message[0] & 15)
+    note = message[1] if len(message) > 1 else None
+    velocity = message[2] if len(message) > 2 else None
+    print(f"type: {messagetype} channel: {messagechannel} note: {note} velocity: {velocity}")
+
+    if MIDI_CHANNEL is not None and messagechannel != MIDI_CHANNEL:
+        return
+
+    if messagetype == 0x9:  # Note on
+        fs.noteon(0, note, velocity)
+    elif messagetype == 0x8 or (messagetype == 9 and velocity == 0):  # Note off
+        fs.noteoff(0, note)
+    elif messagetype == 0xC:  # Program change
+        preset = note
+        fs.program_change(0, note, velocity)
+    elif messagetype == 0xB:  # CC
+        fs.cc(0, note)
 
 
-class MidiInputHandler(object):
-    def __init__(self, port):
-        self.port = port
-        self._wallclock = time.time()
-
+class MidiInputHandler:
     def __call__(self, event, data=None):
         message, deltatime = event
-        global preset
-        messagetype = message[0] >> 4
-        messagechannel = (message[0] & 15)
-        note = message[1] if len(message) > 1 else None
-        velocity = message[2] if len(message) > 2 else None
-        print(f"type: {messagetype} channel: {messagechannel} note: {note} velocity: {velocity}")
-
-        if MIDI_CHANNEL is not None and messagechannel != MIDI_CHANNEL:
-            return
-
-        if messagetype == 9:  # Note on
-            fs.noteon(0, note, velocity)
-        elif messagetype == 8 or (messagetype == 9 and velocity == 0):  # Note off
-            fs.noteoff(0, note)
-        elif messagetype == 12:  # Program change
-            preset = note
-            fs.program_change(0, note, velocity)
-        elif messagetype == 11:  # CC
-            fs.cc(0, note, velocity)
+        forwaredToFluidSynt(message)
 
 
 #########################################
@@ -149,7 +161,7 @@ if USE_SERIALPORT_MIDI:
                 if i == 2 and message[0] >> 4 == 12:  # program change: don't wait for a third byte: it has only 2 bytes
                     message[2] = 0
                     i = 3
-            MidiCallback(message, None)
+            forwaredToFluidSynt(message)
 
 
     MidiThread = threading.Thread(target=MidiSerialCallback)
@@ -173,7 +185,7 @@ while True:
         if name not in registeredMidiInputs:
             midiin = rtmidi.MidiIn()
             midiin.open_port(port)
-            midiin.set_callback(MidiInputHandler(name))
+            midiin.set_callback(MidiInputHandler())
             registeredMidiInputs[name] = midiin
             print(f"Registered MIDI port #{port} device: {name}")
 
