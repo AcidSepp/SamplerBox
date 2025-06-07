@@ -35,30 +35,26 @@ class MidiInputHandler(object):
 
     def __call__(self, event, data=None):
         message, deltatime = event
-        print("[%s] @%0.6f %r" % (self.port, self._wallclock, message))
         global playingnotes, sustain, sustainplayingnotes
         global preset
         messagetype = message[0] >> 4
-        messagechannel = (message[0] & 15) + 1
+        messagechannel = (message[0] & 15)
         note = message[1] if len(message) > 1 else None
-        midinote = note
         velocity = message[2] if len(message) > 2 else None
+
+        print(f"channel: {messagechannel} note: {note} velocity: {velocity}")
+
         if messagetype == 9:  # Note on
-            print("NOTE ON")
-            fs.noteon(0, note, velocity)
+            fs.noteon(messagechannel, note, velocity)
         elif messagetype == 8:  # Note off
-            fs.noteoff(0, note, velocity)
+            fs.noteoff(messagechannel, note, velocity)
         elif messagetype == 12:  # Program change
             print('Program change ' + str(note))
-            fs.program_select(0, sfid, 0, note)
+            fs.program_select(messagechannel, sfid, 0, note)
             preset = note
-        elif (messagetype == 11) and (note == 64) and (velocity < 64):  # sustain pedal off
-            for n in sustainplayingnotes:
-                n.fadeout(50)
-            sustainplayingnotes = []
-            sustain = False
-        elif (messagetype == 11) and (note == 64) and (velocity >= 64):  # sustain pedal on
-            sustain = True
+        elif (messagetype == 11):
+            fs.cc(messagechannel, note, velocity)
+
 
 #########################################
 # BUTTONS THREAD (RASPBERRY PI GPIO)
