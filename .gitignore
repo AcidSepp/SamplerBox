@@ -5,3 +5,6 @@ samplerbox_audio.cpython-313-x86_64-linux-gnu.so
 midiin_callback.py
 deploy.sh
 __pycache__
+/dist/
+/samplerbox.egg-info/
+/venv/
