@@ -6,3 +6,7 @@ midiin_callback.py
 deploy.sh
 __pycache__
 .venv
+/soundfont.sf2
+/fluidsynthexperiment.py
+/synths.sf2
+/KawaiStereoGrand.sf2
