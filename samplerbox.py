@@ -15,18 +15,25 @@
 
 
 import fluidsynth
+import rtmidi
 import threading
 import time
-from config import *
-import rtmidi
 
+from config import *
+
+preset = 0
 
 fs = fluidsynth.Synth(gain=1.0)
 fs.setting('audio.driver', 'pulseaudio')
 fs.start()
 
-sfid = fs.sfload("KawaiStereoGrand.sf2")
-fs.program_select(0, sfid, 0, 0)
+sfid1 = fs.sfload("KawaiStereoGrand.sf2")
+sfid2 = fs.sfload("soundfont.sf2")
+sfid3 = fs.sfload("synths.sf2")
+fs.program_select(0, sfid1, 0, 0)
+fs.program_select(1, sfid2, 0, 0)
+fs.program_select(2, sfid3, 0, 0)
+
 
 class MidiInputHandler(object):
     def __init__(self, port):
@@ -35,24 +42,22 @@ class MidiInputHandler(object):
 
     def __call__(self, event, data=None):
         message, deltatime = event
-        global playingnotes, sustain, sustainplayingnotes
         global preset
         messagetype = message[0] >> 4
         messagechannel = (message[0] & 15)
         note = message[1] if len(message) > 1 else None
         velocity = message[2] if len(message) > 2 else None
 
-        print(f"channel: {messagechannel} note: {note} velocity: {velocity}")
+        print(f"type: {messagetype} channel: {messagechannel} note: {note} velocity: {velocity}")
 
         if messagetype == 9:  # Note on
             fs.noteon(messagechannel, note, velocity)
-        elif messagetype == 8:  # Note off
-            fs.noteoff(messagechannel, note, velocity)
+        elif messagetype == 8 or (messagetype == 9 and velocity == 0):  # Note off
+            fs.noteoff(messagechannel, note)
         elif messagetype == 12:  # Program change
-            print('Program change ' + str(note))
-            fs.program_select(messagechannel, sfid, 0, note)
             preset = note
-        elif (messagetype == 11):
+            fs.program_change(messagechannel, note, velocity)
+        elif messagetype == 11:
             fs.cc(messagechannel, note, velocity)
 
 
@@ -79,13 +84,13 @@ if USE_BUTTONS:
                 preset -= 1
                 if preset < 0:
                     preset = 127
-                    fs.program_select(0, sfid, 0, 0)
+                fs.program_select(0, sfid, 0, preset)
             elif not GPIO.input(17) and (now - lastbuttontime) > 0.2:
                 lastbuttontime = now
                 preset += 1
                 if preset > 127:
                     preset = 0
-                    fs.program_select(0, sfid, 0, 0)
+                fs.program_select(0, sfid, 0, preset)
             time.sleep(0.020)
 
 
