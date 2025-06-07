@@ -27,12 +27,8 @@ fs = fluidsynth.Synth(gain=1.0)
 fs.setting('audio.driver', 'pulseaudio')
 fs.start()
 
-sfid1 = fs.sfload("KawaiStereoGrand.sf2")
-sfid2 = fs.sfload("soundfont.sf2")
-sfid3 = fs.sfload("synths.sf2")
+sfid1 = fs.sfload("synths.sf2")
 fs.program_select(0, sfid1, 0, 0)
-fs.program_select(1, sfid2, 0, 0)
-fs.program_select(2, sfid3, 0, 0)
 
 
 class MidiInputHandler(object):
@@ -47,18 +43,20 @@ class MidiInputHandler(object):
         messagechannel = (message[0] & 15)
         note = message[1] if len(message) > 1 else None
         velocity = message[2] if len(message) > 2 else None
-
         print(f"type: {messagetype} channel: {messagechannel} note: {note} velocity: {velocity}")
 
+        if MIDI_CHANNEL is not None and messagechannel != MIDI_CHANNEL:
+            return
+
         if messagetype == 9:  # Note on
-            fs.noteon(messagechannel, note, velocity)
+            fs.noteon(0, note, velocity)
         elif messagetype == 8 or (messagetype == 9 and velocity == 0):  # Note off
-            fs.noteoff(messagechannel, note)
+            fs.noteoff(0, note)
         elif messagetype == 12:  # Program change
             preset = note
-            fs.program_change(messagechannel, note, velocity)
-        elif messagetype == 11:
-            fs.cc(messagechannel, note, velocity)
+            fs.program_change(0, note, velocity)
+        elif messagetype == 11:  # CC
+            fs.cc(0, note, velocity)
 
 
 #########################################
