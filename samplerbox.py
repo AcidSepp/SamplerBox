@@ -13,32 +13,35 @@
 # MODULES
 #########################################
 
-
 import fluidsynth
+import logging
 import rtmidi
+import sys
 import threading
 import time
+from pathlib import Path
 
 from config import *
 
-from pathlib import Path
+logging.basicConfig(stream=sys.stdout, level=LOG_LEVEL)
+logger = logging.getLogger(name="SamplerBox")
 
 preset = 0
 
-fs = fluidsynth.Synth(gain=1.0)
+fs = fluidsynth.Synth(gain=2.0)
 fs.setting('audio.driver', 'pulseaudio')
 fs.start()
 
 if SOUNDFONT:
     sfid = fs.sfload(SOUNDFONT)
-    print(f"Loading soundfont from file: {SOUNDFONT}")
+    logger.info(f"Loading soundfont from file: {SOUNDFONT}")
 else:
     directory = Path(SAMPLES_DIR)
     sf2_files = [f.name for f in directory.glob("*.sf2") if f.is_file()]
 
     for filename in sf2_files:
         sfid = fs.sfload(filename)
-        print(f"Loading soundfont from file: {filename}")
+        logger.info(f"Loading soundfont from file: {filename}")
 
 fs.bank_select(0, DEFAULT_BANK)
 fs.program_change(0, DEFAULT_PROGRAM)
@@ -49,7 +52,7 @@ def forwaredToFluidSynt(message):
     messagechannel = (message[0] & 15)
     note = message[1] if len(message) > 1 else None
     velocity = message[2] if len(message) > 2 else None
-    print(f"type: {messagetype} channel: {messagechannel} note: {note} velocity: {velocity}")
+    logger.debug(f"Received MIDI message: type={messagetype} channel={messagechannel} note={note} velocity={velocity}")
 
     if MIDI_CHANNEL is not None and messagechannel != MIDI_CHANNEL:
         return
@@ -187,7 +190,7 @@ while True:
             midiin.open_port(port)
             midiin.set_callback(MidiInputHandler())
             registeredMidiInputs[name] = midiin
-            print(f"Registered MIDI port #{port} device: {name}")
+            logger.info(f"Registered MIDI port #{port} device: {name}")
 
     # close old midi devices
     toRemove = []
@@ -198,6 +201,6 @@ while True:
 
     for name in toRemove:
         del registeredMidiInputs[name]
-        print(f"Unregistered MIDI device: {name}")
+        logger.info(f"Unregistered MIDI device: {name}")
 
     time.sleep(2)

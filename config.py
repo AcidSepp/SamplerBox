@@ -3,6 +3,8 @@
 # CONFIG
 #########################################
 
+import logging
+
 SAMPLES_DIR = "."                       # The root directory containing the sample-sets. Example: "/media/" to look for samples on a USB stick / SD card
 USE_BUTTONS = False                     # Set to True to use momentary buttons (connected to RaspberryPi's GPIO pins) to change preset
 USE_I2C_7SEGMENTDISPLAY = False         # Set to True to use a 7-segment display via I2C
@@ -16,5 +18,6 @@ SERIALPORT_BAUDRATE = 31250
 MIDI_CHANNEL = 0
 SOUNDFONT = None # "./KawaiStereoGrand.sf2"
 
-DEFAULT_BANK = 0x4
+DEFAULT_BANK = 0x0
 DEFAULT_PROGRAM = 0x0
+LOG_LEVEL = logging.DEBUG
