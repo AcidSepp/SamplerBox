@@ -49,6 +49,8 @@ bank = int(configparser["samplerbox"]["BANK"])
 
 fs = fluidsynth.Synth(gain=float(configparser["samplerbox"]["GAIN"]))
 fs.setting('audio.driver', 'pulseaudio')
+fs.setting('audio.periods', '2')
+fs.setting('audio.period-size', '64')
 fs.start()
 
 directory = Path(configparser["samplerbox"]["SAMPLES_DIR"])

@@ -1,13 +1,10 @@
 .idea
 build
-samplerbox_audio.c
-samplerbox_audio.cpython-313-x86_64-linux-gnu.so
 midiin_callback.py
 deploy.sh
 __pycache__
 .venv
-/soundfont.sf2
 /fluidsynthexperiment.py
-/synths.sf2
-/KawaiStereoGrand.sf2
 /samplerbox.egg-info/
+*.sf2
+periods
