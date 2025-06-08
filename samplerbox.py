@@ -87,7 +87,7 @@ def forwaredToFluidSynt(message):
         fs.program_change(0, note, velocity)
     elif messagetype == 0xB:  # CC
         logger.debug(f"Forwarding CC to fluidsynth.")
-        fs.cc(0, note)
+        fs.cc(0, note, velocity)
 
 class MidiInputHandler:
     def __call__(self, event, data=None):
