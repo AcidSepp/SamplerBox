@@ -35,7 +35,8 @@ configparser = configparser.ConfigParser({
     "SOUNDFONT": "None",  # "./KawaiStereoGrand.sf2"
     "BANK": "0",
     "PROGRAM": "0",
-    "LOG_LEVEL": "INFO"
+    "LOG_LEVEL": "INFO",
+    "GAIN": "1.0"
 })
 
 configparser.read('config.ini')
@@ -46,7 +47,7 @@ logger = logging.getLogger(name="SamplerBox")
 program = int(configparser["samplerbox"]["PROGRAM"])
 bank = int(configparser["samplerbox"]["BANK"])
 
-fs = fluidsynth.Synth(gain=2.0)
+fs = fluidsynth.Synth(gain=float(configparser["samplerbox"]["GAIN"]))
 fs.setting('audio.driver', 'pulseaudio')
 fs.start()
 
