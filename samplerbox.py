@@ -13,60 +13,81 @@
 # MODULES
 #########################################
 
+import configparser
 import fluidsynth
 import logging
+import os
 import rtmidi
 import sys
 import threading
 import time
 from pathlib import Path
 
-from config import *
+configparser = configparser.ConfigParser({
+    "SAMPLES_DIR": os.getcwd(),
+    "USE_BUTTONS": "False",
+    "USE_I2C_7SEGMENTDISPLAY": "False",
+    "USE_SERIALPORT_MIDI": "False",
+    "USE_SYSTEMLED": "False",
+    "SERIALPORT_PORT": "/dev/ttyAMA0",
+    "SERIALPORT_BAUDRATE": "31250",
+    "MIDI_CHANNEL": "-1",
+    "SOUNDFONT": "None",  # "./KawaiStereoGrand.sf2"
+    "BANK": "0",
+    "PROGRAM": "0",
+    "LOG_LEVEL": "INFO"
+})
 
-logging.basicConfig(stream=sys.stdout, level=LOG_LEVEL)
+configparser.read('config.ini')
+
+logging.basicConfig(stream=sys.stdout, level=configparser["samplerbox"]["LOG_LEVEL"])
 logger = logging.getLogger(name="SamplerBox")
 
-preset = 0
+program = int(configparser["samplerbox"]["PROGRAM"])
+bank = int(configparser["samplerbox"]["BANK"])
 
 fs = fluidsynth.Synth(gain=2.0)
 fs.setting('audio.driver', 'pulseaudio')
 fs.start()
 
-if SOUNDFONT:
-    sfid = fs.sfload(SOUNDFONT)
-    logger.info(f"Loading soundfont from file: {SOUNDFONT}")
-else:
-    directory = Path(SAMPLES_DIR)
-    sf2_files = [f.name for f in directory.glob("*.sf2") if f.is_file()]
+directory = Path(configparser["samplerbox"]["SAMPLES_DIR"])
+sf2_files = [f.name for f in directory.glob("*.sf2") if f.is_file()]
 
-    for filename in sf2_files:
-        sfid = fs.sfload(filename)
-        logger.info(f"Loading soundfont from file: {filename}")
+for filename in sf2_files:
+    sfid = fs.sfload(filename)
+    logger.info(f"Loading soundfont from file: {filename}")
 
-fs.bank_select(0, DEFAULT_BANK)
-fs.program_change(0, DEFAULT_PROGRAM)
+fs.bank_select(0, bank)
+fs.program_change(0, program)
+logger.info(f"Loading bank={bank} programm={program}")
+
+MIDI_CHANNEL = int(configparser["samplerbox"]["MIDI_CHANNEL"])
 
 def forwaredToFluidSynt(message):
-    global preset
+    global program
     messagetype = message[0] >> 4
     messagechannel = (message[0] & 15)
     note = message[1] if len(message) > 1 else None
     velocity = message[2] if len(message) > 2 else None
     logger.debug(f"Received MIDI message: type={messagetype} channel={messagechannel} note={note} velocity={velocity}")
 
-    if MIDI_CHANNEL is not None and messagechannel != MIDI_CHANNEL:
+    if MIDI_CHANNEL != -1 and messagechannel != MIDI_CHANNEL:
+        logger.debug(f"Not forwarding to fluidsynth because the channel={messagechannel} does not the configured channel={MIDI_CHANNEL}")
         return
 
     if messagetype == 0x9:  # Note on
+        logger.debug(f"Forwarding NOTE ON to fluidsynth.")
         fs.noteon(0, note, velocity)
     elif messagetype == 0x8 or (messagetype == 9 and velocity == 0):  # Note off
+        logger.debug(f"Forwarding NOTE OFF to fluidsynth.")
         fs.noteoff(0, note)
     elif messagetype == 0xC:  # Program change
-        preset = note
+        logger.debug(f"Forwarding Program Change to fluidsynth.")
+        program = note
         fs.program_change(0, note, velocity)
     elif messagetype == 0xB:  # CC
+        logger.debug(f"Forwarding CC to fluidsynth.")
         fs.cc(0, note)
-
 
 class MidiInputHandler:
     def __call__(self, event, data=None):
@@ -79,7 +100,7 @@ class MidiInputHandler:
 #
 #########################################
 
-if USE_BUTTONS:
+if configparser["samplerbox"]["USE_BUTTONS"] == "True":
     import RPi.GPIO as GPIO
 
     lastbuttontime = 0
@@ -89,21 +110,21 @@ if USE_BUTTONS:
         GPIO.setmode(GPIO.BCM)
         GPIO.setup(18, GPIO.IN, pull_up_down=GPIO.PUD_UP)
         GPIO.setup(17, GPIO.IN, pull_up_down=GPIO.PUD_UP)
-        global preset, lastbuttontime
+        global program, lastbuttontime
         while True:
             now = time.time()
             if not GPIO.input(18) and (now - lastbuttontime) > 0.2:
                 lastbuttontime = now
-                preset -= 1
-                if preset < 0:
-                    preset = 127
-                fs.program_select(0, sfid, 0, preset)
+                program -= 1
+                if program < 0:
+                    program = 127
+                fs.program_change(0, program)
             elif not GPIO.input(17) and (now - lastbuttontime) > 0.2:
                 lastbuttontime = now
-                preset += 1
-                if preset > 127:
-                    preset = 0
-                fs.program_select(0, sfid, 0, preset)
+                program += 1
+                if program > 127:
+                    program = 0
+                fs.program_change(0, program)
             time.sleep(0.020)
 
 
@@ -116,7 +137,8 @@ if USE_BUTTONS:
 #
 #########################################
 
-if USE_I2C_7SEGMENTDISPLAY:  # requires: 1) i2c-dev in /etc/modules and 2) dtparam=i2c_arm=on in /boot/config.txt
+if configparser["samplerbox"][
+    "USE_I2C_7SEGMENTDISPLAY"] == "True":  # requires: 1) i2c-dev in /etc/modules and 2) dtparam=i2c_arm=on in /boot/config.txt
     import smbus
 
     bus = smbus.SMBus(1)  # using I2C
@@ -145,10 +167,13 @@ else:
 #
 #########################################
 
-if USE_SERIALPORT_MIDI:
+if configparser["samplerbox"]["USE_SERIALPORT_MIDI"] == "True":
     import serial
 
-    ser = serial.Serial(SERIALPORT_PORT, baudrate=SERIALPORT_BAUDRATE)
+    serialPort = int(configparser["samplerbox"]["SERIALPORT_PORT"])
+    baudRate = int(configparser["samplerbox"]["SERIALPORT_BAUDRATE"])
+
+    ser = serial.Serial(serialPort, baudrate=baudRate)
 
 
     def MidiSerialCallback():
