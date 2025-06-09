@@ -10,7 +10,7 @@ dependencies = [
     "python-rtMidi",
     "pyfluidsynth",
     "sf2utils",
-    "audioop-lts; python_version < '3.13'"
+    "audioop-lts; python_version > '3.13'"
 ]
 
 [tool.setuptools]
