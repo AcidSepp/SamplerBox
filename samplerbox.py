@@ -22,6 +22,7 @@ import sys
 import threading
 import time
 from pathlib import Path
+from sf2utils.sf2parse import Sf2File
 
 configparser = configparser.ConfigParser({
     "SAMPLES_DIR": os.getcwd(),
@@ -44,27 +45,10 @@ configparser.read('config.ini')
 logging.basicConfig(stream=sys.stdout, level=configparser["samplerbox"]["LOG_LEVEL"])
 logger = logging.getLogger(name="SamplerBox")
 
-program = int(configparser["samplerbox"]["PROGRAM"])
-bank = int(configparser["samplerbox"]["BANK"])
-
-fs = fluidsynth.Synth(gain=float(configparser["samplerbox"]["GAIN"]))
-fs.setting('audio.driver', 'pulseaudio')
-fs.setting('audio.periods', '2')
-fs.setting('audio.period-size', '64')
-fs.start()
-
-directory = Path(configparser["samplerbox"]["SAMPLES_DIR"])
-sf2_files = [f.name for f in directory.glob("*.sf2") if f.is_file()]
-
-for filename in sf2_files:
-    sfid = fs.sfload(filename)
-    logger.info(f"Loading soundfont from file: {filename}")
-
-fs.bank_select(0, bank)
-fs.program_change(0, program)
-logger.info(f"Loading bank={bank} programm={program}")
-
-MIDI_CHANNEL = int(configparser["samplerbox"]["MIDI_CHANNEL"])
+def load_preset(fs, bank, program):
+    fs.bank_select(0, bank)
+    fs.program_change(0, program)
+    logger.info(f"Loading bank={bank} programm={program} channelInfo={fs.channel_info(0)}")
 
 def forwaredToFluidSynt(message):
     global program
@@ -75,7 +59,8 @@ def forwaredToFluidSynt(message):
     logger.debug(f"Received MIDI message: type={messagetype} channel={messagechannel} note={note} velocity={velocity}")
 
     if MIDI_CHANNEL != -1 and messagechannel != MIDI_CHANNEL:
-        logger.debug(f"Not forwarding to fluidsynth because the channel={messagechannel} does not the configured channel={MIDI_CHANNEL}")
+        logger.debug(
+            f"Not forwarding to fluidsynth because the channel={messagechannel} does not the configured channel={MIDI_CHANNEL}")
         return
 
     if messagetype == 0x9:  # Note on
@@ -91,6 +76,7 @@ def forwaredToFluidSynt(message):
     elif messagetype == 0xB:  # CC
         logger.debug(f"Forwarding CC to fluidsynth.")
         fs.cc(0, note, velocity)
+
 
 class MidiInputHandler:
     def __call__(self, event, data=None):
@@ -203,6 +189,31 @@ if configparser["samplerbox"]["USE_SERIALPORT_MIDI"] == "True":
 # MIDI DEVICES DETECTION
 # MAIN LOOP
 ########################################
+
+fs = fluidsynth.Synth(gain=float(configparser["samplerbox"]["GAIN"]))
+fs.setting('audio.driver', 'pulseaudio')
+fs.setting('audio.periods', '2')
+fs.setting('audio.period-size', '64')
+fs.start()
+
+directory = Path(configparser["samplerbox"]["SAMPLES_DIR"])
+sf2_files = [f for f in directory.glob("*.sf2") if f.is_file()]
+
+for sf2_file in sf2_files:
+    sfid = fs.sfload(sf2_file.name)
+    logger.info(f"Loading soundfont from file: {sf2_file.name}")
+    with open(sf2_file, 'rb') as sf2_file_opened:
+        sf2 = Sf2File(sf2_file_opened)
+        for preset in sf2.presets:
+            if preset.name == "EOP":
+                break
+            logger.info(f"- Bank {preset.bank}, Program {preset.preset}: {preset.name}")
+
+program = int(configparser["samplerbox"]["PROGRAM"])
+bank = int(configparser["samplerbox"]["BANK"])
+load_preset(fs, bank, program)
+
+MIDI_CHANNEL = int(configparser["samplerbox"]["MIDI_CHANNEL"])
 
 registeredMidiInputs = {}
 
