@@ -18,11 +18,11 @@ git clone https://github.com/acidsepp/SamplerBox.git
 cd SamplerBox
 ```
 
-+ Setup Python 3.13.4:
++ (OPTIONAL) Setup Python 3.11.2 to "simulate" the Python Environment on a RaspberryPi:
 
 ```sh
-pyenv install 3.13.4
-pyenv local 3.13.4
+pyenv install 3.11.2
+pyenv local 3.11.2
 ```
 
 + setup venv
