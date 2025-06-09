@@ -6,7 +6,11 @@ build-backend = "setuptools.build_meta"
 name = "samplerbox"
 version = "0.0.1"
 dependencies = [
-    "pyserial", "python-rtMidi", "pyfluidsynth", "sf2utils", "audioop-lts"
+    "pyserial",
+    "python-rtMidi",
+    "pyfluidsynth",
+    "sf2utils",
+    "audioop-lts; python_version < '3.13'"
 ]
 
 [tool.setuptools]
