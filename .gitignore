@@ -8,3 +8,4 @@ __pycache__
 /samplerbox.egg-info/
 *.sf2
 periods
+!/0 AcidSepp Pads.sf2
