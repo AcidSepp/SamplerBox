@@ -8,11 +8,6 @@
 #  samplerbox.py: Main file (now requiring at least Python 3.7)
 #
 
-#########################################
-# IMPORT
-# MODULES
-#########################################
-
 import configparser
 import logging
 import os
@@ -20,151 +15,171 @@ import sys
 import threading
 import time
 from pathlib import Path
+from time import sleep
 
 import fluidsynth
 import rtmidi
 from sf2utils.sf2parse import Sf2File
 
+class SamplerBox:
 
-def load_preset(fs, bank, program):
-    fs.bank_select(0, bank)
-    fs.program_change(0, program)
-    logger.info(f"Loading bank={bank} programm={program} channelInfo={fs.channel_info(0)}")
+    def __init__(self, midi_channel: int, bank: int, program: int, gain: float, samples_dir: str):
+        self.bank = bank
+        self.program = program
+        self.midi_channel = midi_channel
+
+        self.fluid_synth = fluidsynth.Synth(gain=gain)
+        self.fluid_synth.setting('audio.driver', 'pulseaudio')
+        self.fluid_synth.setting('audio.periods', 2)
+        self.fluid_synth.setting('audio.period-size', 64)
+        self.fluid_synth.start()
+
+        directory = Path(samples_dir)
+        sf2_files = [f for f in directory.glob("*.sf2") if f.is_file()]
+
+        for sf2_file in sf2_files:
+            self.fluid_synth.sfload(sf2_file.name)
+            logger.info(f"Loading soundfont from file: {sf2_file.name}")
+            with open(sf2_file, 'rb') as sf2_file_opened:
+                sf2 = Sf2File(sf2_file_opened)
+                for preset in sf2.presets:
+                    if preset.name == "EOP":
+                        break
+                    logger.info(f"- Bank {preset.bank}, Program {preset.preset}: {preset.name}")
+
+        self.load_preset(bank, program)
+        self.setup_midi_device_watcher()
+
+    def load_preset(self, bank: int, program: int):
+        self.bank = bank
+        self.program = program
+        self.fluid_synth.bank_select(0, bank)
+        self.fluid_synth.program_change(0, program)
+        logger.info(f"Loading bank={bank} programm={program} channelInfo={self.fluid_synth.channel_info(0)}")
 
 
-def forwaredToFluidSynt(message):
-    global program
-    messagetype = message[0] >> 4
-    messagechannel = (message[0] & 15)
-    note = message[1] if len(message) > 1 else None
-    velocity = message[2] if len(message) > 2 else None
-    logger.debug(f"Received MIDI message: type={messagetype} channel={messagechannel} note={note} velocity={velocity}")
+    def forward_to_fluid_synth(self, message):
+        messagetype = message[0] >> 4
+        messagechannel = (message[0] & 15)
+        note = message[1] if len(message) > 1 else None
+        velocity = message[2] if len(message) > 2 else None
+        logger.debug(f"Received MIDI message: type={messagetype} channel={messagechannel} note={note} velocity={velocity}")
 
-    if MIDI_CHANNEL != -1 and messagechannel != MIDI_CHANNEL:
-        logger.debug(
-            f"Not forwarding to fluidsynth because the channel={messagechannel} does not the configured channel={MIDI_CHANNEL}")
-        return
+        if self.midi_channel != -1 and messagechannel != self.midi_channel:
+            logger.debug(
+                f"Not forwarding to fluidsynth because the channel={messagechannel} does not the configured channel={self.midi_channel}")
+            return
 
-    if messagetype == 0x9:  # Note on
-        logger.debug(f"Forwarding NOTE ON to fluidsynth.")
-        fs.noteon(0, note, velocity)
-    elif messagetype == 0x8 or (messagetype == 9 and velocity == 0):  # Note off
-        logger.debug(f"Forwarding NOTE OFF to fluidsynth.")
-        fs.noteoff(0, note)
-    elif messagetype == 0xC:  # Program change
-        logger.debug(f"Forwarding Program Change to fluidsynth.")
-        program = note
-        fs.program_change(0, note, velocity)
-    elif messagetype == 0xB:  # CC
-        logger.debug(f"Forwarding CC to fluidsynth.")
-        fs.cc(0, note, velocity)
+        if messagetype == 0x9:  # Note on
+            logger.debug(f"Forwarding NOTE ON to fluidsynth.")
+            self.fluid_synth.noteon(0, note, velocity)
+        elif messagetype == 0x8 or (messagetype == 9 and velocity == 0):  # Note off
+            logger.debug(f"Forwarding NOTE OFF to fluidsynth.")
+            self.fluid_synth.noteoff(0, note)
+        elif messagetype == 0xC:  # Program change
+            logger.debug(f"Forwarding Program Change to fluidsynth.")
+            self.program = note
+            self.fluid_synth.program_change(0, note, velocity)
+        elif messagetype == 0xB:  # CC
+            logger.debug(f"Forwarding CC to fluidsynth.")
+            self.fluid_synth.cc(0, note, velocity)
 
+    def setup_GPIO_buttons(self):
+        import RPi.GPIO as GPIO
+
+        lastbuttontime = 0
+
+        def Buttons():
+            GPIO.setmode(GPIO.BCM)
+            GPIO.setup(18, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+            GPIO.setup(17, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+            global program, lastbuttontime
+            while True:
+                now = time.time()
+                if not GPIO.input(18) and (now - lastbuttontime) > 0.2:
+                    lastbuttontime = now
+                    program -= 1
+                    if program < 0:
+                        program = 127
+                    self.fluid_synth.program_change(0, program)
+                elif not GPIO.input(17) and (now - lastbuttontime) > 0.2:
+                    lastbuttontime = now
+                    program += 1
+                    if program > 127:
+                        program = 0
+                    self.fluid_synth.program_change(0, program)
+                time.sleep(0.020)
+
+        buttons_thread = threading.Thread(target=Buttons)
+        buttons_thread.daemon = True
+        buttons_thread.start()
+
+    def setup_GPIO_serial_MIDI(self, baud_rate: int, serial_port: int):
+        import serial
+
+        ser = serial.Serial(serial_port, baudrate=baud_rate)
+
+        def MidiSerialCallback():
+            message = [0, 0, 0]
+            while True:
+                i = 0
+                while i < 3:
+                    data = ord(ser.read(1))  # read a byte
+                    if data >> 7 != 0:
+                        i = 0  # status byte!   this is the beginning of a midi message: http://www.midi.org/techspecs/midimessages.php
+                    message[i] = data
+                    i += 1
+                    if i == 2 and message[0] >> 4 == 12:  # program change: don't wait for a third byte: it has only 2 bytes
+                        message[2] = 0
+                        i = 3
+                self.forward_to_fluid_synth(message)
+
+        midi_thread = threading.Thread(target=MidiSerialCallback)
+        midi_thread.daemon = True
+        midi_thread.start()
+
+    def setup_midi_device_watcher(self):
+        registered_midi_inputs = {}
+        inputs_watcher = rtmidi.MidiIn()
+
+        def watcher():
+            while True:
+                ports = inputs_watcher.get_ports()
+
+                # add new midi devices
+                for port, name in enumerate(ports):
+                    if name not in registered_midi_inputs:
+                        midiin = rtmidi.MidiIn()
+                        midiin.open_port(port)
+                        midiin.set_callback(MidiInputHandler(self))
+                        registered_midi_inputs[name] = midiin
+                        logger.info(f"Registered MIDI port #{port} device: {name}")
+
+                # close old midi devices
+                toRemove = []
+                for name, midiin in registered_midi_inputs.items():
+                    if name not in ports:
+                        midiin.close_port()
+                        toRemove.append(name)
+
+                for name in toRemove:
+                    del registered_midi_inputs[name]
+                    logger.info(f"Unregistered MIDI device: {name}")
+
+                time.sleep(2)
+
+        thread = threading.Thread(target=watcher)
+        thread.daemon = True
+        thread.start()
 
 class MidiInputHandler:
+
+    def __init__(self, sampler_box: SamplerBox) -> None:
+        self.sampler_box = sampler_box
+
     def __call__(self, event, data=None):
         message, deltatime = event
-        forwaredToFluidSynt(message)
-
-
-#########################################
-# BUTTONS THREAD (RASPBERRY PI GPIO)
-#
-#########################################
-
-def setupButtons():
-    import RPi.GPIO as GPIO
-
-    lastbuttontime = 0
-
-    def Buttons():
-        GPIO.setmode(GPIO.BCM)
-        GPIO.setup(18, GPIO.IN, pull_up_down=GPIO.PUD_UP)
-        GPIO.setup(17, GPIO.IN, pull_up_down=GPIO.PUD_UP)
-        global program, lastbuttontime
-        while True:
-            now = time.time()
-            if not GPIO.input(18) and (now - lastbuttontime) > 0.2:
-                lastbuttontime = now
-                program -= 1
-                if program < 0:
-                    program = 127
-                fs.program_change(0, program)
-            elif not GPIO.input(17) and (now - lastbuttontime) > 0.2:
-                lastbuttontime = now
-                program += 1
-                if program > 127:
-                    program = 0
-                fs.program_change(0, program)
-            time.sleep(0.020)
-
-    ButtonsThread = threading.Thread(target=Buttons)
-    ButtonsThread.daemon = True
-    ButtonsThread.start()
-
-
-#########################################
-# 7-SEGMENT DISPLAY
-#
-#########################################
-
-def setup7SegementDisplay():
-    # requires: 1) i2c-dev in /etc/modules and 2) dtparam=i2c_arm=on in /boot/config.txt
-    import smbus
-
-    bus = smbus.SMBus(1)  # using I2C
-
-    def display(s):
-        for k in '\x76\x79\x00' + s:  # position cursor at 0
-            try:
-                bus.write_byte(0x71, ord(k))
-            except:
-                try:
-                    bus.write_byte(0x71, ord(k))
-                except:
-                    pass
-            time.sleep(0.002)
-
-    display('----')
-    time.sleep(0.5)
-
-
-#########################################
-# MIDI IN via SERIAL PORT
-#
-#########################################
-
-def setupSerial(configparser):
-    import serial
-
-    serialPort = int(configparser["samplerbox"]["SERIALPORT_PORT"])
-    baudRate = int(configparser["samplerbox"]["SERIALPORT_BAUDRATE"])
-
-    ser = serial.Serial(serialPort, baudrate=baudRate)
-
-    def MidiSerialCallback():
-        message = [0, 0, 0]
-        while True:
-            i = 0
-            while i < 3:
-                data = ord(ser.read(1))  # read a byte
-                if data >> 7 != 0:
-                    i = 0  # status byte!   this is the beginning of a midi message: http://www.midi.org/techspecs/midimessages.php
-                message[i] = data
-                i += 1
-                if i == 2 and message[0] >> 4 == 12:  # program change: don't wait for a third byte: it has only 2 bytes
-                    message[2] = 0
-                    i = 3
-            forwaredToFluidSynt(message)
-
-    MidiThread = threading.Thread(target=MidiSerialCallback)
-    MidiThread.daemon = True
-    MidiThread.start()
-
-
-########################################
-# MIDI DEVICES DETECTION
-# MAIN LOOP
-########################################
+        self.sampler_box.forward_to_fluid_synth(message)
 
 if __name__ == '__main__':
     configparser = configparser.ConfigParser({
@@ -187,65 +202,24 @@ if __name__ == '__main__':
     logging.basicConfig(stream=sys.stdout, level=configparser["samplerbox"]["LOG_LEVEL"])
     logger = logging.getLogger(name="SamplerBox")
 
-    if configparser["samplerbox"]["USE_SERIALPORT_MIDI"] == "True":
-        setupSerial(configparser)
-
-    if configparser["samplerbox"]["USE_I2C_7SEGMENTDISPLAY"] == "True":
-        setup7SegementDisplay()
-
-    if configparser["samplerbox"]["USE_BUTTONS"] == "True":
-        setupButtons()
-
-    fs = fluidsynth.Synth(gain=float(configparser["samplerbox"]["GAIN"]))
-    fs.setting('audio.driver', 'pulseaudio')
-    fs.setting('audio.periods', 2)
-    fs.setting('audio.period-size', 64)
-    fs.start()
-
-    directory = Path(configparser["samplerbox"]["SAMPLES_DIR"])
-    sf2_files = [f for f in directory.glob("*.sf2") if f.is_file()]
-
-    for sf2_file in sf2_files:
-        sfid = fs.sfload(sf2_file.name)
-        logger.info(f"Loading soundfont from file: {sf2_file.name}")
-        with open(sf2_file, 'rb') as sf2_file_opened:
-            sf2 = Sf2File(sf2_file_opened)
-            for preset in sf2.presets:
-                if preset.name == "EOP":
-                    break
-                logger.info(f"- Bank {preset.bank}, Program {preset.preset}: {preset.name}")
-
     program = int(configparser["samplerbox"]["PROGRAM"])
     bank = int(configparser["samplerbox"]["BANK"])
-    load_preset(fs, bank, program)
 
-    MIDI_CHANNEL = int(configparser["samplerbox"]["MIDI_CHANNEL"])
+    midi_channel = int(configparser["samplerbox"]["MIDI_CHANNEL"])
 
-    registeredMidiInputs = {}
+    gain = configparser["samplerbox"]["GAIN"]
 
-    inputsWatcher = rtmidi.MidiIn()
+    samples_dir = configparser["samplerbox"]["SAMPLES_DIR"]
+
+    samplerbox = SamplerBox(midi_channel, bank, program, float(gain), samples_dir)
+
+    if configparser["samplerbox"]["USE_SERIALPORT_MIDI"] == "True":
+        serial_port = int(configparser["samplerbox"]["SERIALPORT_PORT"])
+        baud_rate = int(configparser["samplerbox"]["SERIALPORT_BAUDRATE"])
+        samplerbox.setup_GPIO_serial_MIDI(serial_port, baud_rate)
+
+    if configparser["samplerbox"]["USE_BUTTONS"] == "True":
+        samplerbox.setup_GPIO_buttons()
 
     while True:
-        ports = inputsWatcher.get_ports()
-
-        # add new midi devices
-        for port, name in enumerate(ports):
-            if name not in registeredMidiInputs:
-                midiin = rtmidi.MidiIn()
-                midiin.open_port(port)
-                midiin.set_callback(MidiInputHandler())
-                registeredMidiInputs[name] = midiin
-                logger.info(f"Registered MIDI port #{port} device: {name}")
-
-        # close old midi devices
-        toRemove = []
-        for name, midiin in registeredMidiInputs.items():
-            if name not in ports:
-                midiin.close_port()
-                toRemove.append(name)
-
-        for name in toRemove:
-            del registeredMidiInputs[name]
-            logger.info(f"Unregistered MIDI device: {name}")
-
-        time.sleep(2)
+        sleep(5)
