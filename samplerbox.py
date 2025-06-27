@@ -14,41 +14,23 @@
 #########################################
 
 import configparser
-import fluidsynth
 import logging
 import os
-import rtmidi
 import sys
 import threading
 import time
 from pathlib import Path
+
+import fluidsynth
+import rtmidi
 from sf2utils.sf2parse import Sf2File
 
-configparser = configparser.ConfigParser({
-    "SAMPLES_DIR": os.getcwd(),
-    "USE_BUTTONS": "False",
-    "USE_I2C_7SEGMENTDISPLAY": "False",
-    "USE_SERIALPORT_MIDI": "False",
-    "USE_SYSTEMLED": "False",
-    "SERIALPORT_PORT": "/dev/ttyAMA0",
-    "SERIALPORT_BAUDRATE": "31250",
-    "MIDI_CHANNEL": "-1",
-    "SOUNDFONT": "None",  # "./KawaiStereoGrand.sf2"
-    "BANK": "0",
-    "PROGRAM": "0",
-    "LOG_LEVEL": "INFO",
-    "GAIN": "1.0"
-})
-
-configparser.read('config.ini')
-
-logging.basicConfig(stream=sys.stdout, level=configparser["samplerbox"]["LOG_LEVEL"])
-logger = logging.getLogger(name="SamplerBox")
 
 def load_preset(fs, bank, program):
     fs.bank_select(0, bank)
     fs.program_change(0, program)
     logger.info(f"Loading bank={bank} programm={program} channelInfo={fs.channel_info(0)}")
+
 
 def forwaredToFluidSynt(message):
     global program
@@ -89,11 +71,10 @@ class MidiInputHandler:
 #
 #########################################
 
-if configparser["samplerbox"]["USE_BUTTONS"] == "True":
+def setupButtons():
     import RPi.GPIO as GPIO
 
     lastbuttontime = 0
-
 
     def Buttons():
         GPIO.setmode(GPIO.BCM)
@@ -116,22 +97,21 @@ if configparser["samplerbox"]["USE_BUTTONS"] == "True":
                 fs.program_change(0, program)
             time.sleep(0.020)
 
-
     ButtonsThread = threading.Thread(target=Buttons)
     ButtonsThread.daemon = True
     ButtonsThread.start()
+
 
 #########################################
 # 7-SEGMENT DISPLAY
 #
 #########################################
 
-if configparser["samplerbox"][
-    "USE_I2C_7SEGMENTDISPLAY"] == "True":  # requires: 1) i2c-dev in /etc/modules and 2) dtparam=i2c_arm=on in /boot/config.txt
+def setup7SegementDisplay():
+    # requires: 1) i2c-dev in /etc/modules and 2) dtparam=i2c_arm=on in /boot/config.txt
     import smbus
 
     bus = smbus.SMBus(1)  # using I2C
-
 
     def display(s):
         for k in '\x76\x79\x00' + s:  # position cursor at 0
@@ -144,26 +124,22 @@ if configparser["samplerbox"][
                     pass
             time.sleep(0.002)
 
-
     display('----')
     time.sleep(0.5)
-else:
-    def display(s):
-        pass
+
 
 #########################################
 # MIDI IN via SERIAL PORT
 #
 #########################################
 
-if configparser["samplerbox"]["USE_SERIALPORT_MIDI"] == "True":
+def setupSerial(configparser):
     import serial
 
     serialPort = int(configparser["samplerbox"]["SERIALPORT_PORT"])
     baudRate = int(configparser["samplerbox"]["SERIALPORT_BAUDRATE"])
 
     ser = serial.Serial(serialPort, baudrate=baudRate)
-
 
     def MidiSerialCallback():
         message = [0, 0, 0]
@@ -180,66 +156,96 @@ if configparser["samplerbox"]["USE_SERIALPORT_MIDI"] == "True":
                     i = 3
             forwaredToFluidSynt(message)
 
-
     MidiThread = threading.Thread(target=MidiSerialCallback)
     MidiThread.daemon = True
     MidiThread.start()
+
 
 ########################################
 # MIDI DEVICES DETECTION
 # MAIN LOOP
 ########################################
 
-fs = fluidsynth.Synth(gain=float(configparser["samplerbox"]["GAIN"]))
-fs.setting('audio.driver', 'pulseaudio')
-fs.setting('audio.periods', 2)
-fs.setting('audio.period-size', 64)
-fs.start()
+if __name__ == '__main__':
+    configparser = configparser.ConfigParser({
+        "SAMPLES_DIR": os.getcwd(),
+        "USE_BUTTONS": "False",
+        "USE_I2C_7SEGMENTDISPLAY": "False",
+        "USE_SERIALPORT_MIDI": "False",
+        "USE_SYSTEMLED": "False",
+        "SERIALPORT_PORT": "/dev/ttyAMA0",
+        "SERIALPORT_BAUDRATE": "31250",
+        "MIDI_CHANNEL": "-1",
+        "SOUNDFONT": "None",  # "./KawaiStereoGrand.sf2"
+        "BANK": "0",
+        "PROGRAM": "0",
+        "LOG_LEVEL": "INFO",
+        "GAIN": "1.0"
+    })
+    configparser.read('config.ini')
 
-directory = Path(configparser["samplerbox"]["SAMPLES_DIR"])
-sf2_files = [f for f in directory.glob("*.sf2") if f.is_file()]
+    logging.basicConfig(stream=sys.stdout, level=configparser["samplerbox"]["LOG_LEVEL"])
+    logger = logging.getLogger(name="SamplerBox")
 
-for sf2_file in sf2_files:
-    sfid = fs.sfload(sf2_file.name)
-    logger.info(f"Loading soundfont from file: {sf2_file.name}")
-    with open(sf2_file, 'rb') as sf2_file_opened:
-        sf2 = Sf2File(sf2_file_opened)
-        for preset in sf2.presets:
-            if preset.name == "EOP":
-                break
-            logger.info(f"- Bank {preset.bank}, Program {preset.preset}: {preset.name}")
+    if configparser["samplerbox"]["USE_SERIALPORT_MIDI"] == "True":
+        setupSerial(configparser)
 
-program = int(configparser["samplerbox"]["PROGRAM"])
-bank = int(configparser["samplerbox"]["BANK"])
-load_preset(fs, bank, program)
+    if configparser["samplerbox"]["USE_I2C_7SEGMENTDISPLAY"] == "True":
+        setup7SegementDisplay()
 
-MIDI_CHANNEL = int(configparser["samplerbox"]["MIDI_CHANNEL"])
+    if configparser["samplerbox"]["USE_BUTTONS"] == "True":
+        setupButtons()
 
-registeredMidiInputs = {}
+    fs = fluidsynth.Synth(gain=float(configparser["samplerbox"]["GAIN"]))
+    fs.setting('audio.driver', 'pulseaudio')
+    fs.setting('audio.periods', 2)
+    fs.setting('audio.period-size', 64)
+    fs.start()
 
-inputsWatcher = rtmidi.MidiIn()
+    directory = Path(configparser["samplerbox"]["SAMPLES_DIR"])
+    sf2_files = [f for f in directory.glob("*.sf2") if f.is_file()]
 
-while True:
-    ports = inputsWatcher.get_ports()
+    for sf2_file in sf2_files:
+        sfid = fs.sfload(sf2_file.name)
+        logger.info(f"Loading soundfont from file: {sf2_file.name}")
+        with open(sf2_file, 'rb') as sf2_file_opened:
+            sf2 = Sf2File(sf2_file_opened)
+            for preset in sf2.presets:
+                if preset.name == "EOP":
+                    break
+                logger.info(f"- Bank {preset.bank}, Program {preset.preset}: {preset.name}")
 
-    # add new midi devices
-    for port, name in enumerate(ports):
-        if name not in registeredMidiInputs:
-            midiin = rtmidi.MidiIn()
-            midiin.open_port(port)
-            midiin.set_callback(MidiInputHandler())
-            registeredMidiInputs[name] = midiin
-            logger.info(f"Registered MIDI port #{port} device: {name}")
+    program = int(configparser["samplerbox"]["PROGRAM"])
+    bank = int(configparser["samplerbox"]["BANK"])
+    load_preset(fs, bank, program)
 
-    # close old midi devices
-    toRemove = []
-    for name, midiin in registeredMidiInputs.items():
-        if name not in ports:
-            midiin.close_port()
-            toRemove.append(name)
+    MIDI_CHANNEL = int(configparser["samplerbox"]["MIDI_CHANNEL"])
 
-    for name in toRemove:
-        del registeredMidiInputs[name]
-        logger.info(f"Unregistered MIDI device: {name}")
+    registeredMidiInputs = {}
 
-    time.sleep(2)
+    inputsWatcher = rtmidi.MidiIn()
+
+    while True:
+        ports = inputsWatcher.get_ports()
+
+        # add new midi devices
+        for port, name in enumerate(ports):
+            if name not in registeredMidiInputs:
+                midiin = rtmidi.MidiIn()
+                midiin.open_port(port)
+                midiin.set_callback(MidiInputHandler())
+                registeredMidiInputs[name] = midiin
+                logger.info(f"Registered MIDI port #{port} device: {name}")
+
+        # close old midi devices
+        toRemove = []
+        for name, midiin in registeredMidiInputs.items():
+            if name not in ports:
+                midiin.close_port()
+                toRemove.append(name)
+
+        for name in toRemove:
+            del registeredMidiInputs[name]
+            logger.info(f"Unregistered MIDI device: {name}")
+
+        time.sleep(2)
