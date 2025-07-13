@@ -33,13 +33,13 @@ class ChannelSetting:
 
 class SamplerBox:
 
-    def __init__(self, midi_channel: int, channel_settings: List[ChannelSetting], gain: float, samples_dir: str):
+    def __init__(self, midi_channel: int, channel_settings: List[ChannelSetting], gain: float, samples_dir: str,
+                 fluid_synth_settings):
         self.midi_channel = midi_channel
 
         self.fluid_synth = fluidsynth.Synth(gain=gain)
-        self.fluid_synth.setting('audio.driver', 'pulseaudio')
-        self.fluid_synth.setting('audio.periods', 2)
-        self.fluid_synth.setting('audio.period-size', 64)
+        for key, value in fluid_synth_settings.items():
+            self.fluid_synth.setting(key, value)
         self.fluid_synth.start()
 
         directory = Path(samples_dir)
@@ -137,41 +137,47 @@ class MidiInputHandler:
 
 
 if __name__ == '__main__':
-    configparser = configparser.ConfigParser({
+    samplerbox_config_parser = configparser.ConfigParser({
         "SAMPLES_DIR": os.getcwd(),
-        "USE_BUTTONS": "False",
-        "USE_I2C_7SEGMENTDISPLAY": "False",
-        "USE_SERIALPORT_MIDI": "False",
-        "USE_SYSTEMLED": "False",
-        "SERIALPORT_PORT": "/dev/ttyAMA0",
-        "SERIALPORT_BAUDRATE": "31250",
-        "MIDI_CHANNEL": "-1",
-        "SOUNDFONT": "None",  # "./KawaiStereoGrand.sf2"
-        "BANK": "0",
-        "PROGRAM": "0",
         "LOG_LEVEL": "INFO",
         "GAIN": "1.0"
     })
-    configparser.read('config.ini')
+    samplerbox_config_parser.read('config.ini')
 
-    logging.basicConfig(stream=sys.stdout, level=configparser["samplerbox"]["LOG_LEVEL"])
+    logging.basicConfig(stream=sys.stdout, level=samplerbox_config_parser["samplerbox"]["LOG_LEVEL"])
     logger = logging.getLogger(name="SamplerBox")
 
-    midi_channel = int(configparser["samplerbox"]["MIDI_CHANNEL"])
+    gain = samplerbox_config_parser["samplerbox"]["GAIN"]
 
-    gain = configparser["samplerbox"]["GAIN"]
-
-    samples_dir = configparser["samplerbox"]["SAMPLES_DIR"]
+    samples_dir = samplerbox_config_parser["samplerbox"]["SAMPLES_DIR"]
 
     channel_settings: list[ChannelSetting] = []
     for midi_channel in range(0, 15):
         section_name = "channel" + str(midi_channel)
-        if configparser.has_section(section_name):
-            bank = int(configparser[section_name]["bank"])
-            program = int(configparser[section_name]["program"])
+        if samplerbox_config_parser.has_section(section_name):
+            bank = int(samplerbox_config_parser[section_name]["bank"])
+            program = int(samplerbox_config_parser[section_name]["program"])
             channel_settings.append(ChannelSetting(midi_channel, bank, program))
 
-    samplerbox = SamplerBox(midi_channel, channel_settings, float(gain), samples_dir)
+    fluisynth_settings: dict[str, int | float | str] = {}
+
+    # NOTE: We're accessing the private `_sections` attribute of ConfigParser here
+    # because the public `.items()` method merges in default values from the defaults dict,
+    # which causes unrelated default keys (e.g., "SAMPLES_DIR", "GAIN") to appear in
+    # unrelated sections like "fluidSynthSettingsInt". This leads to parsing errors when
+    # trying to cast those values to int or float. By using `_sections`, we get only the
+    # explicitly defined keys from the INI file, without default value pollution.
+    # raw=True does not seem to work
+    for key, value in samplerbox_config_parser._sections["fluidSynthSettingsInt"].items():
+        fluisynth_settings[key] = int(value)
+
+    for key, value in samplerbox_config_parser._sections["fluidSynthSettingsFloat"].items():
+        fluisynth_settings[key] = float(value)
+
+    for key, value in samplerbox_config_parser._sections["fluidSynthSettingsString"].items():
+        fluisynth_settings[key] = value
+
+    samplerbox = SamplerBox(midi_channel, channel_settings, float(gain), samples_dir, fluisynth_settings)
 
     while True:
         sleep(5)
