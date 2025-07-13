@@ -33,10 +33,8 @@ class ChannelSetting:
 
 class SamplerBox:
 
-    def __init__(self, midi_channel: int, channel_settings: List[ChannelSetting], gain: float, samples_dir: str,
+    def __init__(self, channel_settings: List[ChannelSetting], gain: float, samples_dir: str,
                  fluid_synth_settings):
-        self.midi_channel = midi_channel
-
         self.fluid_synth = fluidsynth.Synth(gain=gain)
         for key, value in fluid_synth_settings.items():
             self.fluid_synth.setting(key, value)
@@ -177,7 +175,7 @@ if __name__ == '__main__':
     for key, value in samplerbox_config_parser._sections["fluidSynthSettingsString"].items():
         fluisynth_settings[key] = value
 
-    samplerbox = SamplerBox(midi_channel, channel_settings, float(gain), samples_dir, fluisynth_settings)
+    samplerbox = SamplerBox(channel_settings, float(gain), samples_dir, fluisynth_settings)
 
     while True:
         sleep(5)
